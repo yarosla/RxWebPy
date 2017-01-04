@@ -1,7 +1,4 @@
 # coding=utf-8
 import logging
 
-# noinspection PyUnresolvedReferences
-import rxweb.server
-
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)-15s %(levelname)s %(name)-17s %(threadName)s %(message)s')
