@@ -256,6 +256,34 @@ class PostHandlerThreadPooled(Handler):
             .observe_on(event_loop_scheduler)
 
 
+class UppercaseFilter(Handler):
+    def handle(self, request, next_handlers):
+        response_observable = super().handle(request, next_handlers)
+
+        def add_uppercase(response: HttpResponse) -> HttpResponse:
+            response.content_out = response.content_out.map(lambda b: b.upper())
+            return response
+
+        return response_observable.map(add_uppercase)
+
+
+class SubrequestHandler(Handler):
+    def handle(self, request, next_handlers):
+        response_observable = self.dispatcher.handle_request(HttpRequest(b'GET', b'/bbb'))
+
+        def process_content(content: bytes) -> HttpResponse:
+            content = b'{%s-%s-%s}' % (content, content, content)
+            return HttpResponse(200, b'OK', content=content)
+
+        def collect_content(response: HttpResponse) -> Observable:
+            return response.content_out \
+                .reduce(lambda acc, x: acc + x, b'')
+
+        return response_observable \
+            .flat_map(collect_content) \
+            .map(process_content)
+
+
 @pytest.mark.parametrize('input', [
     [b'POST /aaa HTTP/1.1\r\nContent-Length: 3\r\n\r\n123', b'GET /bbb HTTP/1.1\r\n\r\n'],
     [b'POST /aaa HTTP/1.1\r\nContent-Length: 3\r\n\r\n123GET /bbb HTTP/1.1\r\n\r\n'],
@@ -273,6 +301,46 @@ def test_http_server(input):
 
     assert conn.output == \
            b'HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 5\r\n\r\n[123]' \
+           b'HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 4\r\n\r\nbbbb'
+
+
+@pytest.mark.parametrize('input', [
+    [b'POST /aaa HTTP/1.1\r\nContent-Length: 3\r\n\r\nabc', b'GET /bbb HTTP/1.1\r\n\r\n'],
+    [b'POST /aaa HTTP/1.1\r\nContent-Length: 3\r\n\r\nabcGET /bbb HTTP/1.1\r\n\r\n'],
+    [b'POST /aaa HTTP/1.1\r\nContent-Length: 3\r\n\r\nabcG', b'ET /bbb HTTP/1.1\r\n\r\n'],
+    [b'POST /aaa HTTP/1.1\r\nContent-Length: ', b'3\r\n\r\nabc', b'GET /bbb/1 HTTP/1.1\r\n\r\n'],
+])
+def test_uppercase_filter(input):
+    dispatcher = Dispatcher()
+    dispatcher.register_handlers(b'/aaa', UppercaseFilter(), PostHandler())
+    dispatcher.register_handlers(b'/bbb', UppercaseFilter(), GetHandler())
+
+    conn = ConnectionStub(input)
+    server = HttpServer(Observable.just(conn), dispatcher)
+    server.serve()
+
+    assert conn.output == \
+           b'HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 5\r\n\r\n[ABC]' \
+           b'HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 4\r\n\r\nBBBB'
+
+
+@pytest.mark.parametrize('input', [
+    [b'POST /sub HTTP/1.1\r\n\r\n', b'GET /bbb HTTP/1.1\r\n\r\n'],
+    [b'POST /sub HTTP/1.1\r\n\r\nGET /bbb HTTP/1.1\r\n\r\n'],
+    [b'POST /sub HTTP/1.1\r\n\r\nG', b'ET /bbb HTTP/1.1\r\n\r\n'],
+    [b'POST /sub HTTP/1.1', b'\r\n\r\n', b'GET /bbb/1 HTTP/1.1\r\n\r\n'],
+])
+def test_subrequest_handler(input):
+    dispatcher = Dispatcher()
+    dispatcher.register_handlers(b'/bbb', GetHandler())
+    dispatcher.register_handlers(b'/sub', SubrequestHandler())
+
+    conn = ConnectionStub(input)
+    server = HttpServer(Observable.just(conn), dispatcher)
+    server.serve()
+
+    assert conn.output == \
+           b'HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 16\r\n\r\n{bbbb-bbbb-bbbb}' \
            b'HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 4\r\n\r\nbbbb'
 
 

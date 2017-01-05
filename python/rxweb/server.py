@@ -30,8 +30,8 @@ class HttpResponse(Exception):
     def __init__(self, status_code: int, status_text: bytes, headers=None,
                  content: bytes = None, content_out: Observable = None):
         super(HttpResponse, self).__init__(str(status_code) + ' ' + str(status_text))
-        self.status_code = status_code
-        self.status_text = status_text
+        self.status_code = status_code  # type: int
+        self.status_text = status_text  # type: bytes
         if content_out:
             self.content_out = content_out
             self.headers = headers or (b'Content-Type: text/plain; charset=utf-8', b'Connection: close')
@@ -42,11 +42,11 @@ class HttpResponse(Exception):
                            (b'Content-Type: text/plain; charset=utf-8',
                            b'Content-Length: ' + str(len(content)).encode())
 
-    def serialize_headers(self):
+    def serialize_headers(self) -> bytes:
         return b'HTTP/1.1 ' + str(self.status_code).encode() + b' ' + self.status_text + b'\r\n' \
                + b'\r\n'.join(self.headers) + b'\r\n\r\n'
 
-    def serialize(self):
+    def serialize(self) -> Observable:
         return self.content_out.start_with(self.serialize_headers())
 
     def __repr__(self):
@@ -225,6 +225,8 @@ def http_parse(self):
 
 
 class Handler:
+    dispatcher = None  # type: Dispatcher
+
     def handle(self, request, next_handlers):
         # type: (HttpRequest, List[HttpRequest]) -> Optional[Observable]
         return self.pass_to_next(request, next_handlers)
@@ -250,8 +252,10 @@ class Dispatcher:
     def __init__(self):
         self.handlers = {}
 
-    def register_handlers(self, url_prefix: bytes, *handlers):
+    def register_handlers(self, url_prefix: bytes, *handlers: List[Handler]):
         self.handlers[url_prefix] = handlers
+        for handler in handlers:
+            handler.dispatcher = self
 
     def handle_request(self, request: HttpRequest) -> Observable:
         try:
