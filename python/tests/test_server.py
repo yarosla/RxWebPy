@@ -69,7 +69,8 @@ class ConnectionStub(Connection):
         data_out = Subject()
         data_out.subscribe(subscriber)
 
-        super().__init__(Observable.from_(input), data_out)
+        self.data_in = Observable.from_(input)
+        self.data_out = data_out
 
 
 def test_subscriber():

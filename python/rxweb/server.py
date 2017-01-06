@@ -7,6 +7,7 @@ from rx import AnonymousObservable
 from rx import Observable
 from rx import Observer
 from rx.core import ObservableBase
+from rx.core import Scheduler
 from rx.disposables import AnonymousDisposable
 from rx.disposables import RefCountDisposable
 from rx.disposables import SingleAssignmentDisposable
@@ -18,12 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 class Connection:
-    def __init__(self, data_in: Observable, data_out: Observer):
-        self.data_in = data_in
-        self.data_out = data_out
+    data_in: Observable
+    data_out: Observer
 
     def close(self):
-        pass
+        """Called by HttpServer to finalize connection"""
 
 
 class HttpResponse(Exception):
@@ -73,6 +73,8 @@ class HttpRequest:
 
 
 class BufferedSubject(ObservableBase, Observer):
+    """Not strictly a Subject as it allows only a single subscription."""
+
     def __init__(self):
         super().__init__()
         self.buffer = []
@@ -86,6 +88,7 @@ class BufferedSubject(ObservableBase, Observer):
         if self.observer:
             self.observer.on_next(item)
         else:
+            logger.debug('buffering %r', item)
             self.buffer.append(item)
 
     def on_completed(self):
@@ -292,9 +295,10 @@ def tapper(message):
 
 
 class HttpServer:
-    def __init__(self, listener: Observable, dispatcher: Dispatcher):
+    def __init__(self, listener: Observable, dispatcher: Dispatcher, scheduler: Scheduler = None):
         self.listener = listener
         self.dispatcher = dispatcher
+        self.scheduler = scheduler
 
     def accept_connection(self, conn: Connection) -> Observable:
         logger.debug('connection accepted %r', conn)
