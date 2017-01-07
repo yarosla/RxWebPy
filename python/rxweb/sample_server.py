@@ -64,7 +64,7 @@ if __name__ == '__main__':
     dispatcher.register_handlers(b'/post/sync', PostHandlerSync(scheduler))
     dispatcher.register_handlers(b'/post/async', PostHandlerAsync(loop))
 
-    HttpServer(listener, dispatcher, scheduler).serve()
+    HttpServer(listener, dispatcher, scheduler).start()
     try:
         loop.run_forever()
     finally:

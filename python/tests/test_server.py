@@ -11,21 +11,14 @@ from rx.concurrency.eventloopscheduler import event_loop_scheduler
 from rx.core import ObserverBase
 from rx.subjects import Subject
 
+from rxweb.helpers import tapper
 from rxweb.server import HttpRequest, Connection, HttpResponse, HttpServer, Dispatcher, Handler
 
 logger = logging.getLogger(__name__)
 
 
-def tapper(message):
-    def tap(x):
-        logger.debug('[tapped] %s: %r', message, x)
-        return x
-
-    return tap
-
-
 def content_loader(request: HttpRequest) -> Observable:
-    """Returns Mono<HttpRequest>, single value observable"""
+    """Returns Observable[HttpRequest], single value observable"""
 
     def collect_content(content: bytes):
         request.content_received = content
@@ -76,7 +69,7 @@ class ConnectionStub(Connection):
 def test_subscriber():
     subscriber = RequestSubscriberStub()
 
-    Observable.just(HttpRequest('GET', '/aaa')) \
+    Observable.just(HttpRequest(b'GET', b'/aaa')) \
         .map(tapper('subscriber')) \
         .map(content_loader) \
         .map(tapper('handled')) \
@@ -84,7 +77,7 @@ def test_subscriber():
         .map(tapper('merged')) \
         .subscribe(subscriber)
 
-    assert subscriber.results == [('GET', '/aaa', None)]
+    assert subscriber.results == [(b'GET', b'/aaa', None)]
     assert subscriber.completed
     assert subscriber.error is None
 
@@ -270,7 +263,7 @@ class UppercaseFilter(Handler):
 
 class SubrequestHandler(Handler):
     def handle(self, request, next_handlers):
-        response_observable = self.dispatcher.handle_request(HttpRequest(b'GET', b'/bbb'))
+        response_observable = self.dispatcher.dispatch(HttpRequest(b'GET', b'/bbb'))
 
         def process_content(content: bytes) -> HttpResponse:
             content = b'{%s-%s-%s}' % (content, content, content)
@@ -298,7 +291,7 @@ def test_http_server(input):
 
     conn = ConnectionStub(input)
     server = HttpServer(Observable.just(conn), dispatcher)
-    server.serve()
+    server.start()
 
     assert conn.output == \
            b'HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 5\r\n\r\n[123]' \
@@ -318,7 +311,7 @@ def test_uppercase_filter(input):
 
     conn = ConnectionStub(input)
     server = HttpServer(Observable.just(conn), dispatcher)
-    server.serve()
+    server.start()
 
     assert conn.output == \
            b'HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 5\r\n\r\n[ABC]' \
@@ -338,7 +331,7 @@ def test_subrequest_handler(input):
 
     conn = ConnectionStub(input)
     server = HttpServer(Observable.just(conn), dispatcher)
-    server.serve()
+    server.start()
 
     assert conn.output == \
            b'HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 16\r\n\r\n{bbbb-bbbb-bbbb}' \
@@ -356,7 +349,7 @@ def test_404(input):
 
     conn = ConnectionStub(input)
     server = HttpServer(Observable.just(conn), dispatcher)
-    server.serve()
+    server.start()
 
     assert conn.output == \
            b'HTTP/1.1 404 Not Found\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 19\r\n\r\nNo handler for /aaa' \
@@ -374,7 +367,7 @@ def test_bad_request(input):
 
     conn = ConnectionStub(input)
     server = HttpServer(Observable.just(conn), dispatcher)
-    server.serve()
+    server.start()
 
     logger.debug('bad response: %s', conn.output)
     assert re.match(
@@ -396,7 +389,7 @@ def test_scheduled_http_server(input):
     conn = ConnectionStub(input)
     listener = Observable.just(conn, scheduler=event_loop_scheduler)
     server = HttpServer(listener, dispatcher)
-    server.serve()
+    server.start()
 
     time.sleep(1.1)
     logger.debug('verify %s', conn.output)
@@ -422,7 +415,7 @@ def test_parallel_processing(input):
     conn2 = ConnectionStub(input)
     listener = Observable.of(conn1, conn2, scheduler=event_loop_scheduler)
     server = HttpServer(listener, dispatcher)
-    server.serve()
+    server.start()
 
     time.sleep(3.5)  # 6 slow requests over 2 connections => shall complete in 3 seconds
     for conn in (conn1, conn2):

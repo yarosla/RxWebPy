@@ -21,7 +21,7 @@ class AsyncConnection(asyncio.Protocol, Connection):
         super().__init__()
         self.on_connect = on_connect
 
-    def connection_made(self, transport):
+    def connection_made(self, transport: asyncio.Transport):
         peername = transport.get_extra_info('peername')
         logger.info('Connection from %s', peername)
         self.transport = transport
@@ -53,10 +53,13 @@ class AsyncConnection(asyncio.Protocol, Connection):
 
     def on_data_out_error(self, exception):
         logger.exception('data_out error: %r', exception)
-        self.transport.close()
+        self.close()
 
     def on_data_out_completed(self):
         logger.info('data_out completed')
+        self.close()
+
+    def close(self):
         self.transport.close()
 
 
@@ -71,19 +74,20 @@ class AsyncListener(ObservableBase):
     def _subscribe_core(self, observer: Observer):
         assert not self.observer
         self.observer = observer
-        self.server = self.loop.create_server(self.create_connection, self.host, self.port)
+
+        def create_connection():
+            return AsyncConnection(self.observer.on_next)
+
+        def dispose():
+            logger.info('listener closed')
+            self.server.close()
+            self.loop.run_until_complete(self.server.wait_closed())
+            self.server = None
+            self.observer = None
+
+        self.server = self.loop.create_server(create_connection, self.host, self.port)
         self.loop.create_task(self.server)
-        return AnonymousDisposable.create(self.close)
-
-    def create_connection(self):
-        return AsyncConnection(self.observer.on_next)
-
-    def close(self):
-        logger.info('listener closed')
-        self.server.close()
-        self.loop.run_until_complete(self.server.wait_closed())
-        self.server = None
-        self.observer = None
+        return AnonymousDisposable.create(dispose)
 
 
 class AsyncScheduler(AsyncIOScheduler):

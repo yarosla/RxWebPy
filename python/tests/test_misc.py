@@ -1,9 +1,14 @@
 # coding=utf-8
 import asyncio
 import logging
+import time
 import types
 
 logger = logging.getLogger(__name__)
+
+
+# Tests here have nothing to do with HTTP server.
+# Just a playground.
 
 
 async def coro1(a):
@@ -129,7 +134,25 @@ def test_coro4():
         assert vv == [46, -2]
 
     loop = asyncio.get_event_loop()
-    try:
-        loop.run_until_complete(a_test_coro4())
-    finally:
-        loop.close()
+    loop.run_until_complete(a_test_coro4())
+
+
+def test_future():
+    loop = asyncio.get_event_loop()
+
+    async def target(x: int) -> int:
+        loop.run_in_executor(None, time.sleep, 0.1)
+        return x + 1
+
+    def intermediate(x: int) -> asyncio.Future:
+        return loop.create_task(target(x))
+
+    async def main():
+        future = intermediate(5)
+        logger.debug('intermediate future = %r', future)
+        value = await future
+        assert value == 6
+
+    loop.create_task(main())
+    loop.call_later(0.5, loop.stop)
+    loop.run_forever()
